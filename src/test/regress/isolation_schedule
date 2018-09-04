@@ -43,3 +43,6 @@ test: isolation_delete_vs_all
 test: isolation_truncate_vs_all
 test: isolation_drop_vs_all
 test: isolation_ddl_vs_all
+
+# MX tests
+test: isolation_reference_on_mx

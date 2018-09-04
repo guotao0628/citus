@@ -12,24 +12,31 @@
 
 #include "postgres.h"
 #include "miscadmin.h"
+#include "libpq-fe.h"
 
 #include "funcapi.h"
 #include "access/htup_details.h"
 #include "catalog/pg_type.h"
 #include "datatype/timestamp.h"
 #include "distributed/backend_data.h"
+#include "distributed/connection_management.h"
 #include "distributed/listutils.h"
 #include "distributed/lock_graph.h"
+#include "distributed/master_protocol.h"
 #include "distributed/metadata_cache.h"
+#include "distributed/remote_commands.h"
 #include "distributed/transaction_identifier.h"
 #include "nodes/execnodes.h"
 #include "storage/ipc.h"
+#include "storage/lmgr.h"
 #include "storage/lwlock.h"
 #include "storage/proc.h"
 #include "storage/spin.h"
 #include "storage/s_lock.h"
+#include "utils/builtins.h"
 #include "utils/timestamp.h"
 
+#define PROCESSID_SEQUENCE_NAME "public.blocking_process_sequence"
 
 /*
  * Each backend's data reside in the shared memory
@@ -63,11 +70,86 @@ static BackendData *MyBackendData = NULL;
 
 static void BackendManagementShmemInit(void);
 static size_t BackendManagementShmemSize(void);
+static int64 GetRemoteProcessId(MultiConnection *connection);
 
 
 PG_FUNCTION_INFO_V1(assign_distributed_transaction_id);
 PG_FUNCTION_INFO_V1(get_current_transaction_id);
+PG_FUNCTION_INFO_V1(get_global_active_transactions);
 PG_FUNCTION_INFO_V1(get_all_active_transactions);
+PG_FUNCTION_INFO_V1(master_run_from_same_connection);
+
+
+Datum
+master_run_from_same_connection(PG_FUNCTION_ARGS)
+{
+	text *nodeName = PG_GETARG_TEXT_P(0);
+	uint32 nodePort = PG_GETARG_UINT32(1);
+	text *queryText = PG_GETARG_TEXT_P(2);
+	bool closeConnection = PG_GETARG_BOOL(3);
+	char *queryString = text_to_cstring(queryText);
+	char *nodeNameString = text_to_cstring(nodeName);
+	int connectionFlags = SESSION_LIFESPAN;
+	MultiConnection *connection = NULL;
+	text *sequenceName = cstring_to_text(PROCESSID_SEQUENCE_NAME);
+	Oid sequenceId = ResolveRelationId(sequenceName);
+
+	CheckCitusVersion(ERROR);
+
+	connection = GetNodeConnection(connectionFlags, nodeNameString, nodePort);
+
+	if (PQstatus(connection->pgConn) != CONNECTION_OK)
+	{
+		elog(INFO, "failed to connect to %s:%d", nodeNameString, (int) nodePort);
+		PG_RETURN_VOID();
+	}
+
+	ExecuteCriticalRemoteCommand(connection, queryString);
+	ClearResults(connection, false);
+
+	if (closeConnection)
+	{
+		CloseConnection(connection);
+		PG_RETURN_VOID();
+	}
+
+	/*
+	 * Set process id of worker to the sequence. It will be used to detect
+	 * waiting steps on MX isolation tests.
+	 */
+	DirectFunctionCall2(setval_oid, sequenceId, Int64GetDatum(GetRemoteProcessId(
+																  connection)));
+
+	PG_RETURN_VOID();
+}
+
+
+/*
+ * GetRemoteProcessId() get the process id of remote transaction opened
+ * by the connection.
+ */
+static int64
+GetRemoteProcessId(MultiConnection *connection)
+{
+	StringInfo queryStringInfo = makeStringInfo();
+	PGresult *result = NULL;
+	int64 rowCount = 0;
+
+	appendStringInfo(queryStringInfo, "SELECT * FROM get_current_transaction_id()");
+
+	ExecuteOptionalRemoteCommand(connection, queryStringInfo->data, &result);
+
+	rowCount = PQntuples(result);
+
+	if (rowCount != 1)
+	{
+		PG_RETURN_VOID();
+	}
+
+	ClearResults(connection, false);
+
+	return ParseIntField(result, 0, 1);
+}
 
 
 /*
@@ -177,6 +259,116 @@ get_current_transaction_id(PG_FUNCTION_ARGS)
 	heapTuple = heap_form_tuple(tupleDescriptor, values, isNulls);
 
 	PG_RETURN_DATUM(HeapTupleGetDatum(heapTuple));
+}
+
+
+/*
+ * get_global_active_transactions returns all the available information about all
+ * the active backends from each node of the cluster.
+ */
+Datum
+get_global_active_transactions(PG_FUNCTION_ARGS)
+{
+	ReturnSetInfo *returnSetInfo = (ReturnSetInfo *) fcinfo->resultinfo;
+	TupleDesc tupleDescriptor = NULL;
+	Tuplestorestate *tupleStore = NULL;
+	MemoryContext perQueryContext = NULL;
+	MemoryContext oldContext = NULL;
+	List *workerNodeList = NULL;
+	ListCell *workerNodeCell = NULL;
+	StringInfo queryToSend = makeStringInfo();
+	PGresult *result = NULL;
+	Datum values[5];
+	bool isNulls[5];
+
+	CheckCitusVersion(ERROR);
+
+	/* check to see if caller supports us returning a tuplestore */
+	if (returnSetInfo == NULL || !IsA(returnSetInfo, ReturnSetInfo))
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("set-valued function called in context " \
+						"that cannot accept a set")));
+	}
+
+	if (!(returnSetInfo->allowedModes & SFRM_Materialize))
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("materialize mode required, but it is not " \
+						"allowed in this context")));
+	}
+
+	/* build a tuple descriptor for our result type */
+	if (get_call_result_type(fcinfo, NULL, &tupleDescriptor) != TYPEFUNC_COMPOSITE)
+	{
+		elog(ERROR, "return type must be a row type");
+	}
+
+	appendStringInfo(queryToSend, "select * from get_all_active_transactions();");
+
+	perQueryContext = returnSetInfo->econtext->ecxt_per_query_memory;
+
+	oldContext = MemoryContextSwitchTo(perQueryContext);
+
+	tupleStore = tuplestore_begin_heap(true, false, work_mem);
+	returnSetInfo->returnMode = SFRM_Materialize;
+	returnSetInfo->setResult = tupleStore;
+	returnSetInfo->setDesc = tupleDescriptor;
+
+	MemoryContextSwitchTo(oldContext);
+
+	/* prevent concurrent pg_dist_node changes */
+	LockRelationOid(DistNodeRelationId(), RowShareLock);
+
+	workerNodeList = ActivePrimaryNodeList();
+	foreach(workerNodeCell, workerNodeList)
+	{
+		WorkerNode *workerNode = (WorkerNode *) lfirst(workerNodeCell);
+		char *nodeName = workerNode->workerName;
+		uint32 nodePort = workerNode->workerPort;
+
+		int64 rowIndex = 0;
+		int64 rowCount = 0;
+		int64 colCount = 0;
+
+		MultiConnection *connection = GetNodeConnection(FORCE_NEW_CONNECTION, nodeName,
+														nodePort);
+		ExecuteOptionalRemoteCommand(connection, queryToSend->data, &result);
+
+		rowCount = PQntuples(result);
+		colCount = PQnfields(result);
+
+		if (colCount != 5)
+		{
+			ereport(WARNING, (errmsg("unexpected number of columns from "
+									 "get_all_active_transactions")));
+			continue;
+		}
+
+		for (rowIndex = 0; rowIndex < rowCount; rowIndex++)
+		{
+			memset(values, 0, sizeof(values));
+			memset(isNulls, false, sizeof(isNulls));
+
+			values[0] = ParseIntField(result, rowIndex, 0);
+			values[1] = ParseIntField(result, rowIndex, 1);
+			values[2] = ParseIntField(result, rowIndex, 2);
+			values[3] = ParseIntField(result, rowIndex, 3);
+			values[4] = ParseTimestampTzField(result, rowIndex, 4);
+
+			tuplestore_putvalues(tupleStore, tupleDescriptor, values, isNulls);
+		}
+
+		ClearResults(connection, false);
+		CloseConnection(connection);
+	}
+
+	/* clean up and return the tuplestore */
+	tuplestore_donestoring(tupleStore);
+
+	PG_RETURN_VOID();
 }
 
 
