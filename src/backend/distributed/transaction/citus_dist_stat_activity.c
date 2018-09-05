@@ -124,12 +124,12 @@
 	#define CITUS_DIST_STAT_ACTIVITY_QUERY \
 	"\
 	SELECT \
-		pg_stat_activity.datid, \
-		pg_stat_activity.datname, \
-		pg_stat_activity.pid, \
 		dist_txs.initiator_node_identifier, \
 		dist_txs.transaction_number, \
 		dist_txs.transaction_stamp, \
+		pg_stat_activity.datid, \
+		pg_stat_activity.datname, \
+		pg_stat_activity.pid, \
 		pg_stat_activity.usesysid, \
 		pg_stat_activity.usename, \
 		pg_stat_activity.application_name, \
@@ -158,12 +158,12 @@
 	#define CITUS_DIST_STAT_ACTIVITY_QUERY \
 	"\
 	SELECT \
-		dist_txs.database_id, \
-		pg_stat_activity.datname, \
-		dist_txs.process_id, \
 		dist_txs.initiator_node_identifier, \
 		dist_txs.transaction_number, \
 		dist_txs.transaction_stamp, \
+		pg_stat_activity.datid, \
+		pg_stat_activity.datname, \
+		pg_stat_activity.pid, \
 		pg_stat_activity.usesysid, \
 		pg_stat_activity.usename, \
 		pg_stat_activity.application_name, \
@@ -196,16 +196,15 @@ typedef struct CitusDistStat
 	text *query_host_name;
 	int query_host_port;
 
-	/* fields from get_all_active_transactions */
-	Oid database_id;
-	Name databaese_name;
-	int process_id;
 	text *master_query_host_name;
 	int master_query_host_port;
 	uint64 distributed_transaction_number;
 	TimestampTz distributed_transaction_stamp;
 
 	/* fields from pg_stat_statement */
+	Oid database_id;
+	Name databaese_name;
+	int process_id;
 	Oid usesysid;
 	Name usename;
 	text *application_name;
@@ -438,11 +437,6 @@ ParseCitusDistStat(PGresult *result, int64 rowIndex)
 	int initiator_node_identifier = 0;
 	WorkerNode *initiatorWorkerNode = NULL;
 
-	/* fields from get_all_active_transactions */
-	citusDistStat->database_id = ParseIntField(result, rowIndex, 0);
-	citusDistStat->databaese_name = ParseNameField(result, rowIndex, 1);
-	citusDistStat->process_id = ParseIntField(result, rowIndex, 2);
-
 	/*
 	 * Replace initiator_node_identifier with initiator_node_hostname
 	 * and initiator_node_port given that those are a lot more useful.
@@ -457,7 +451,7 @@ ParseCitusDistStat(PGresult *result, int64 rowIndex)
 	 *     we're executing the function on the coordinator, manually mark it
 	 *     as "coordinator_host" given that we cannot know the host and port
 	 */
-	initiator_node_identifier = ParseIntField(result, rowIndex, 3);
+	initiator_node_identifier = ParseIntField(result, rowIndex, 0);
 	if (initiator_node_identifier != 0)
 	{
 		bool nodeExists = false;
@@ -485,11 +479,14 @@ ParseCitusDistStat(PGresult *result, int64 rowIndex)
 		citusDistStat->master_query_host_port = 0;
 	}
 
-	citusDistStat->distributed_transaction_number = ParseIntField(result, rowIndex, 4);
+	citusDistStat->distributed_transaction_number = ParseIntField(result, rowIndex, 1);
 	citusDistStat->distributed_transaction_stamp =
-		ParseTimestampTzField(result, rowIndex, 5);
+		ParseTimestampTzField(result, rowIndex, 2);
 
 	/* fields from pg_stat_statement */
+	citusDistStat->database_id = ParseIntField(result, rowIndex, 3);
+	citusDistStat->databaese_name = ParseNameField(result, rowIndex, 4);
+	citusDistStat->process_id = ParseIntField(result, rowIndex, 5);
 	citusDistStat->usesysid = ParseIntField(result, rowIndex, 6);
 	citusDistStat->usename = ParseNameField(result, rowIndex, 7);
 	citusDistStat->application_name = ParseTextField(result, rowIndex, 8);
@@ -665,40 +662,40 @@ ReturnCitusDistStats(List *citusStatsList, FunctionCallInfo fcinfo)
 
 		values[0] = PointerGetDatum(citusDistStat->query_host_name);
 		values[1] = Int32GetDatum(citusDistStat->query_host_port);
-		values[2] = ObjectIdGetDatum(citusDistStat->database_id);
-
-		if (citusDistStat->databaese_name != NULL)
-		{
-			values[3] = CStringGetDatum(NameStr(*citusDistStat->databaese_name));
-		}
-		else
-		{
-			nulls[3] = true;
-		}
-
-		values[4] = Int32GetDatum(citusDistStat->process_id);
 
 		if (citusDistStat->master_query_host_name != NULL)
 		{
-			values[5] = PointerGetDatum(citusDistStat->master_query_host_name);
+			values[2] = PointerGetDatum(citusDistStat->master_query_host_name);
+		}
+		else
+		{
+			nulls[2] = true;
+		}
+
+		values[3] = Int32GetDatum(citusDistStat->master_query_host_port);
+		values[4] = UInt64GetDatum(citusDistStat->distributed_transaction_number);
+
+		if (citusDistStat->distributed_transaction_stamp != DT_NOBEGIN)
+		{
+			values[5] = TimestampTzGetDatum(citusDistStat->distributed_transaction_stamp);
 		}
 		else
 		{
 			nulls[5] = true;
 		}
 
-		values[6] = Int32GetDatum(citusDistStat->master_query_host_port);
-		values[7] = UInt64GetDatum(citusDistStat->distributed_transaction_number);
+		values[6] = ObjectIdGetDatum(citusDistStat->database_id);
 
-		if (citusDistStat->distributed_transaction_stamp != DT_NOBEGIN)
+		if (citusDistStat->databaese_name != NULL)
 		{
-			values[8] = TimestampTzGetDatum(citusDistStat->distributed_transaction_stamp);
+			values[7] = CStringGetDatum(NameStr(*citusDistStat->databaese_name));
 		}
 		else
 		{
-			nulls[8] = true;
+			nulls[7] = true;
 		}
 
+		values[8] = Int32GetDatum(citusDistStat->process_id);
 		values[9] = ObjectIdGetDatum(citusDistStat->usesysid);
 
 		if (citusDistStat->usename != NULL)
