@@ -1,6 +1,6 @@
 /*-------------------------------------------------------------------------
  *
- * citus_dist_stat_statements.c
+ * citus_dist_stat_activity.c
  *
  *	This file contains functions for monitoring the distributed transactions
  *	accross the cluster.
