@@ -594,7 +594,11 @@ ParseXIDField(PGresult *result, int rowIndex, int colIndex)
 
 	if (PQgetisnull(result, rowIndex, colIndex))
 	{
-		return 0;
+		/*
+		 * We'd show NULL if user hits the max transaction id, but that should be
+		 * one of the minor problems they'd probably hit.
+		 */
+		return PG_UINT32_MAX;
 	}
 
 	resultString = PQgetvalue(result, rowIndex, colIndex);
@@ -799,8 +803,23 @@ ReturnCitusDistStats(List *citusStatsList, FunctionCallInfo fcinfo)
 			nulls[21] = true;
 		}
 
-		values[22] = TransactionIdGetDatum(citusDistStat->backend_xid);
-		values[23] = TransactionIdGetDatum(citusDistStat->backend_xmin);
+		if (citusDistStat->backend_xid != PG_UINT32_MAX)
+		{
+			values[22] = TransactionIdGetDatum(citusDistStat->backend_xid);
+		}
+		else
+		{
+			nulls[22] = true;
+		}
+
+		if (citusDistStat->backend_xmin != PG_UINT32_MAX)
+		{
+			values[23] = TransactionIdGetDatum(citusDistStat->backend_xmin);
+		}
+		else
+		{
+			nulls[23] = true;
+		}
 
 		if (citusDistStat->query != NULL)
 		{
