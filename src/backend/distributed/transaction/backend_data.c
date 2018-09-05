@@ -38,7 +38,6 @@
 #include "utils/timestamp.h"
 
 #define PROCESSID_SEQUENCE_NAME "public.blocking_process_sequence"
-#define PROCESSID_COORDINATOR_SEQUENCE_NAME "public.blocking_process_coordinator_sequence"
 
 /*
  * Each backend's data reside in the shared memory
@@ -95,8 +94,6 @@ master_run_from_same_connection(PG_FUNCTION_ARGS)
 	MultiConnection *connection = NULL;
 	text *sequenceName = cstring_to_text(PROCESSID_SEQUENCE_NAME);
 	Oid sequenceId = ResolveRelationId(sequenceName);
-	text *coordinatorSequenceName = cstring_to_text(PROCESSID_COORDINATOR_SEQUENCE_NAME);
-	Oid coordinatorSequenceId = ResolveRelationId(coordinatorSequenceName);
 
 	CheckCitusVersion(ERROR);
 
@@ -123,8 +120,6 @@ master_run_from_same_connection(PG_FUNCTION_ARGS)
 	 */
 	DirectFunctionCall2(setval_oid, sequenceId, Int64GetDatum(GetRemoteProcessId(
 																  connection)));
-
-	DirectFunctionCall2(setval_oid, coordinatorSequenceId, Int32GetDatum(MyProcPid));
 
 	PG_RETURN_VOID();
 }

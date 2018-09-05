@@ -3,9 +3,6 @@ setup
 	CREATE SEQUENCE public.blocking_process_sequence;
 	SELECT setval('public.blocking_process_sequence', 1);
 
-	CREATE SEQUENCE public.blocking_process_coordinator_sequence;
-	SELECT setval('public.blocking_process_coordinator_sequence', 1);
-
   	SELECT citus.replace_isolation_tester_func();
   	SELECT citus.refresh_isolation_tester_prepared_statement();
 
@@ -22,7 +19,6 @@ teardown
 {
 	DROP TABLE ref_table;
 	DROP SEQUENCE public.blocking_process_sequence;
-	DROP SEQUENCE public.blocking_process_coordinator_sequence;
 	SELECT citus.restore_isolation_tester_func();
 }
 

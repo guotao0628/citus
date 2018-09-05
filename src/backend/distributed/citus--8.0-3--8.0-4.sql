@@ -38,19 +38,16 @@ RETURNS int4[] AS $$
       -- on the seequnce can be read from other sessions.
       --
       -- Note that, you need to create sequence with the name 'blocking_process_sequence'
-      -- and 'blocking_process_coordinator_sequence' to test MX functionalities.
+      -- to test MX functionalities.
       SELECT nextval('public.blocking_process_sequence') - 1 INTO workerProcessId;
 
       SELECT transaction_number INTO mLocalTransactionNum 
         FROM get_global_active_transactions() WHERE process_id = workerProcessId;
 
-       IF EXISTS (SELECT waiting_transaction_num AS txn_num FROM dump_global_wait_edges()
+        IF EXISTS (SELECT waiting_transaction_num AS txn_num FROM dump_global_wait_edges()
                      WHERE waiting_transaction_num = mLocalTransactionNum) THEN
-
-         SELECT nextval('public.blocking_process_coordinator_sequence') - 1 INTO coordinatorProcessId;
-         SELECT array_agg(coordinatorProcessId) INTO mRemoteBlockingPids;
-
-       END IF;
+            SELECT array_agg(pBlockedPid) INTO mRemoteBlockingPids;
+        END IF;
 
     ELSE
       -- Check whether two transactions initiated from the coordinator get locked
