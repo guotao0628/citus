@@ -53,7 +53,11 @@
  *
  *  In other words, citus_dist_stat_activity returns only the queries that are the
  *  distributed queries. citus_worker_stat_activity returns only the queries that
- *  are worker queries (e.g., queries on the shards) initiated by the distributed queries.
+ *  are worker queries (e.g., queries on the shards) initiated by those distributed
+ *  queries. To understand this better, let us give an example. If a users starts
+ *  a query like "UPDATE table SET value = 1", this query would show up on
+ *  citus_dist_stat_activity. The same query would generate #shard worker queries,
+ *  all of which would show up on citus_worker_stat_activity.
  *
  *  An important note on this views is that they only show the activity
  *  that are inside distributed transactions. Distributed transactions
@@ -230,7 +234,7 @@ static List * CitusDistStatActivity(const char *statQuery);
 static void ReturnCitusDistStats(List *citusStatsList, FunctionCallInfo fcinfo);
 static CitusDistStat * ParseCitusDistStat(PGresult *result, int64 rowIndex);
 
-/* utlity functions to parse the fields */
+/* utility functions to parse the fields */
 static text * ParseTextField(PGresult *result, int rowIndex, int colIndex);
 static Name ParseNameField(PGresult *result, int rowIndex, int colIndex);
 static inet * ParseInetField(PGresult *result, int rowIndex, int colIndex);
@@ -255,7 +259,7 @@ citus_dist_stat_activity(PG_FUNCTION_ARGS)
 
 	CheckCitusVersion(ERROR);
 
-	/* set the transactionOriginator to true in the query */
+	/* set the workerQuery to false in the query */
 	citusDistStatQuery = makeStringInfo();
 	appendStringInfo(citusDistStatQuery, CITUS_DIST_STAT_ACTIVITY_QUERY,
 					 workerQuery);
@@ -282,7 +286,7 @@ citus_worker_stat_activity(PG_FUNCTION_ARGS)
 
 	CheckCitusVersion(ERROR);
 
-	/* set the transactionOriginator to true in the query */
+	/* set the workerQuery to true in the query */
 	cituWorkerStatQuery = makeStringInfo();
 	appendStringInfo(cituWorkerStatQuery, CITUS_DIST_STAT_ACTIVITY_QUERY,
 					 workerQuery);

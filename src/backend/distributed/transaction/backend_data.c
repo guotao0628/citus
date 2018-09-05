@@ -249,6 +249,7 @@ get_all_active_transactions(PG_FUNCTION_ARGS)
 	{
 		BackendData *currentBackend =
 			&backendManagementShmemData->backends[backendIndex];
+		bool coordinatorOriginatedQuery = false;
 
 		SpinLockAcquire(&currentBackend->mutex);
 
@@ -267,14 +268,8 @@ get_all_active_transactions(PG_FUNCTION_ARGS)
 		 * We prefer to use worker_query instead of transactionOriginator in the user facing
 		 * functions since its more intuitive. Thus, we negate the result before returning.
 		 */
-		if (!currentBackend->transactionId.transactionOriginator)
-		{
-			values[3] = BoolGetDatum(true);
-		}
-		else
-		{
-			values[3] = BoolGetDatum(false);
-		}
+		coordinatorOriginatedQuery = currentBackend->transactionId.transactionOriginator;
+		values[3] = !coordinatorOriginatedQuery;
 
 		values[4] = UInt64GetDatum(currentBackend->transactionId.transactionNumber);
 		values[5] = TimestampTzGetDatum(currentBackend->transactionId.timestamp);
