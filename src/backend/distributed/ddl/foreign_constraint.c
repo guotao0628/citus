@@ -142,8 +142,10 @@ ErrorIfUnsupportedForeignConstraint(Relation relation, char distributionMethod,
 	pgConstraint = heap_open(ConstraintRelationId, AccessShareLock);
 	ScanKeyInit(&scanKey[0], Anum_pg_constraint_conrelid, BTEqualStrategyNumber, F_OIDEQ,
 				relation->rd_id);
-	scanDescriptor = systable_beginscan(pgConstraint, ConstraintRelidIndexId, true, NULL,
-										scanKeyCount, scanKey);
+
+
+	scanDescriptor = systable_beginscan(pgConstraint, ConstraintRelidTypidNameIndexId,
+										true, NULL, scanKeyCount, scanKey);
 
 	heapTuple = systable_getnext(scanDescriptor);
 	while (HeapTupleIsValid(heapTuple))
@@ -485,8 +487,8 @@ GetTableForeignConstraintCommands(Oid relationId)
 	pgConstraint = heap_open(ConstraintRelationId, AccessShareLock);
 	ScanKeyInit(&scanKey[0], Anum_pg_constraint_conrelid, BTEqualStrategyNumber, F_OIDEQ,
 				relationId);
-	scanDescriptor = systable_beginscan(pgConstraint, ConstraintRelidIndexId, true, NULL,
-										scanKeyCount, scanKey);
+	scanDescriptor = systable_beginscan(pgConstraint, ConstraintRelidTypidNameIndexId,
+										true, NULL, scanKeyCount, scanKey);
 
 	heapTuple = systable_getnext(scanDescriptor);
 	while (HeapTupleIsValid(heapTuple))
@@ -535,8 +537,8 @@ HasForeignKeyToReferenceTable(Oid relationId)
 	pgConstraint = heap_open(ConstraintRelationId, AccessShareLock);
 	ScanKeyInit(&scanKey[0], Anum_pg_constraint_conrelid, BTEqualStrategyNumber, F_OIDEQ,
 				relationId);
-	scanDescriptor = systable_beginscan(pgConstraint, ConstraintRelidIndexId, true, NULL,
-										scanKeyCount, scanKey);
+	scanDescriptor = systable_beginscan(pgConstraint, ConstraintRelidTypidNameIndexId,
+										true, NULL, scanKeyCount, scanKey);
 
 	heapTuple = systable_getnext(scanDescriptor);
 	while (HeapTupleIsValid(heapTuple))

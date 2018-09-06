@@ -38,6 +38,9 @@
 #define PreventInTransactionBlock PreventTransactionChain
 #define DatumGetJsonbP(d) DatumGetJsonb(d)
 
+/* following is introduced in PG11 */
+#define ConstraintRelidTypidNameIndexId ConstraintRelidIndexId
+
 /* following defines also exist for PG11 */
 #define RELATION_OBJECT_TYPE ACL_OBJECT_RELATION
 #define IndexInfoAttributeNumberArray(indexinfo) (indexinfo->ii_KeyAttrNumbers)
