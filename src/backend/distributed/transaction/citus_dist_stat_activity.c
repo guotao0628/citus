@@ -245,9 +245,10 @@ static TransactionId ParseXIDField(PGresult *result, int rowIndex, int colIndex)
 
 /* utility functions to fetch the fields from heapTuple */
 static List * GetLocalNodeCitusDistStat(const char *statQuery);
-static List * LocalNodeCitusDistStat(const char *statQuery, const char *hostname, int port);
+static List * LocalNodeCitusDistStat(const char *statQuery, const char *hostname, int
+									 port);
 static CitusDistStat * HeapTupleToCitusDistStat(HeapTuple result, TupleDesc
-													   rowDescriptor);
+												rowDescriptor);
 static int64 ParseIntFieldFromHeapTuple(HeapTuple tuple, TupleDesc tupdesc, int colIndex);
 static text * ParseTextFieldFromHeapTuple(HeapTuple tuple, TupleDesc tupdesc, int
 										  colIndex);
